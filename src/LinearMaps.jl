@@ -3,7 +3,7 @@ module LinearMaps
 export LinearMap, FunctionMap, FillMap, InverseMap
 export ⊗, squarekron, kronsum, ⊕, sumkronsum, khatrirao, facesplitting
 
-using LinearAlgebra
+using LinearAlgebra, LRUCache
 using LinearAlgebra: AbstractQ
 import LinearAlgebra: mul!, tr
 
@@ -11,11 +11,11 @@ using Base: require_one_based_indexing
 
 abstract type LinearMap{T} end
 
-const AbstractVecOrMatOrQ{T} = Union{AbstractVecOrMat{T}, AbstractQ{T}}
-const MapOrVecOrMat{T} = Union{LinearMap{T}, AbstractVecOrMatOrQ{T}}
-const MapOrMatrix{T} = Union{LinearMap{T}, AbstractMatrix{T}, AbstractQ{T}}
+const AbstractVecOrMatOrQ{T} = Union{AbstractVecOrMat{T},AbstractQ{T}}
+const MapOrVecOrMat{T} = Union{LinearMap{T},AbstractVecOrMatOrQ{T}}
+const MapOrMatrix{T} = Union{LinearMap{T},AbstractMatrix{T},AbstractQ{T}}
 const TransposeAbsVecOrMat{T} = Transpose{T,<:AbstractVecOrMat}
-const RealOrComplex = Union{Real, Complex}
+const RealOrComplex = Union{Real,Complex}
 
 const LinearMapTuple = Tuple{Vararg{LinearMap}}
 const LinearMapVector = AbstractVector{<:LinearMap}
@@ -70,7 +70,7 @@ _iscompatible((A, B)) = size(A, 2) == size(B, 1)
 function check_dim_mul(A, B)
     _iscompatible((A, B)) ||
         throw(DimensionMismatch("second dimension of left factor, $(size(A, 2)), " *
-            "does not match first dimension of right factor, $(size(B, 1))"))
+                                "does not match first dimension of right factor, $(size(B, 1))"))
     return nothing
 end
 # check dimension consistency for multiplication C = A*B
@@ -138,7 +138,7 @@ function Base.:(*)(A::LinearMap, x::AbstractVector)
     return @inbounds mul!(y, A, x)
 end
 
-(L::LinearMap)(x::AbstractVector) = L*x
+(L::LinearMap)(x::AbstractVector) = L * x
 
 """
     mul!(Y::AbstractVecOrMat, A::LinearMap, B::AbstractVector) -> Y
@@ -276,7 +276,7 @@ function _generic_map_mul!(y, A, x::AbstractVector, α, β)
         if isone(β)
             y .+= z
         else
-            y .= y.*β .+ z
+            y .= y .* β .+ z
         end
         return y
     elseif iszero(α)
@@ -409,7 +409,7 @@ LinearMap(f, M::Int, N::Int; kwargs...) = LinearMap{Float64}(f, M, N; kwargs...)
 LinearMap(f, fc, M::Int; kwargs...) = LinearMap{Float64}(f, fc, M; kwargs...)
 LinearMap(f, fc, M::Int, N::Int; kwargs...) = LinearMap{Float64}(f, fc, M, N; kwargs...)
 
-LinearMap(A::MapOrVecOrMat, dims::Dims{2}, index::NTuple{2, AbstractVector{Int}}) =
+LinearMap(A::MapOrVecOrMat, dims::Dims{2}, index::NTuple{2,AbstractVector{Int}}) =
     EmbeddedMap(convert(LinearMap, A), dims, index[1], index[2])
 LinearMap(A::MapOrVecOrMat, dims::Dims{2}; offset::Dims{2}) =
     EmbeddedMap(convert(LinearMap, A), dims; offset=offset)
