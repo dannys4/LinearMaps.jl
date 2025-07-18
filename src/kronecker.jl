@@ -157,7 +157,6 @@ Base.:(==)(A::KroneckerMap, B::KroneckerMap) =
 # (size(B,1), size(B,2), thread, type) -> Vector of spaces
 const kron_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(maxsize=8)
 
-__mm = 0
 @inline function _kronmul!(Y, B, X, A)
     # minimize intermediate memory allocation
     if size(B, 2) * size(A, 1) <= size(B, 1) * size(A, 2)
