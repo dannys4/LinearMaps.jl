@@ -1,25 +1,25 @@
 struct BlockMap{T,
-                As<:LinearMapTupleOrVector,
-                Rs<:Tuple{Vararg{Int}}} <: LinearMap{T}
+    As<:LinearMapTupleOrVector,
+    Rs<:Tuple{Vararg{Int}}} <: LinearMap{T}
     maps::As
     rows::Rs
     rowranges::Vector{UnitRange{Int}}
     colranges::Vector{UnitRange{Int}}
     function BlockMap{T,As,Rs}(maps::As, rows::Rs) where
-                {T, As<:LinearMapTupleOrVector, Rs<:Tuple{Vararg{Int}}}
+    {T,As<:LinearMapTupleOrVector,Rs<:Tuple{Vararg{Int}}}
         for TA in Base.Generator(eltype, maps)
             promote_type(T, TA) == T ||
                 error("eltype $TA cannot be promoted to $T in BlockMap constructor")
         end
         rowranges, colranges = rowcolranges(maps, rows)
-        return new{T, As, Rs}(maps, rows, rowranges, colranges)
+        return new{T,As,Rs}(maps, rows, rowranges, colranges)
     end
 end
 
-BlockMap{T}(maps::As, rows::Rs) where {T, As<:LinearMapTupleOrVector, Rs} =
-    BlockMap{T, As, Rs}(maps, rows)
-BlockMap(maps::As, rows::Rs) where {As<:LinearMapTupleOrVector, Rs} =
-    BlockMap{promote_type(map(eltype, maps)...), As, Rs}(maps, rows)
+BlockMap{T}(maps::As, rows::Rs) where {T,As<:LinearMapTupleOrVector,Rs} =
+    BlockMap{T,As,Rs}(maps, rows)
+BlockMap(maps::As, rows::Rs) where {As<:LinearMapTupleOrVector,Rs} =
+    BlockMap{promote_type(map(eltype, maps)...),As,Rs}(maps, rows)
 
 MulStyle(A::BlockMap) = MulStyle(A.maps...)
 
@@ -81,7 +81,7 @@ julia> L * ones(Int, 6)
  6
 ```
 """
-function Base.hcat(As::Union{LinearMap, UniformScaling, AbstractArray, AbstractQ}...)
+function Base.hcat(As::Union{LinearMap,UniformScaling,AbstractArray,AbstractQ}...)
     T = promote_type(map(eltype, As)...)
     nbc = length(As)
 
@@ -90,7 +90,7 @@ function Base.hcat(As::Union{LinearMap, UniformScaling, AbstractArray, AbstractQ
     # this should not happen, function should only be called with at least one LinearMap
     @assert !isnothing(j)
     @inbounds nrows = size(As[j], 1)::Int
-    
+
     return BlockMap{T}(promote_to_lmaps(ntuple(_ -> nrows, Val(nbc)), 1, 1, As...), (nbc,))
 end
 
@@ -119,7 +119,7 @@ julia> L * ones(Int, 3)
  3
 ```
 """
-function Base.vcat(As::Union{LinearMap, UniformScaling, AbstractArray, AbstractQ}...)
+function Base.vcat(As::Union{LinearMap,UniformScaling,AbstractArray,AbstractQ}...)
     T = promote_type(map(eltype, As)...)
     nbr = length(As)
 
@@ -162,7 +162,7 @@ julia> L * ones(Int, 6)
  6
 ```
 """
-function Base.hvcat(rows::Tuple{Vararg{Int}}, As::Union{LinearMap, UniformScaling, AbstractArray, AbstractQ}...)
+function Base.hvcat(rows::Tuple{Vararg{Int}}, As::Union{LinearMap,UniformScaling,AbstractArray,AbstractQ}...)
     nr = length(rows)
     T = promote_type(map(eltype, As)...)
     sum(rows) == length(As) ||
@@ -180,7 +180,7 @@ function Base.hvcat(rows::Tuple{Vararg{Int}}, As::Union{LinearMap, UniformScalin
             end
         end
         if ni >= 0
-            n[j .+ (1:rows[i])] .= ni
+            n[j.+(1:rows[i])] .= ni
         end
         j += rows[i]
     end
@@ -224,7 +224,7 @@ promote_to_lmaps_(n::Int, dim, A::LinearMap) = (check_dim(A, dim, n); A)
 promote_to_lmaps(n, k, dim) = ()
 promote_to_lmaps(n, k, dim, A) = (promote_to_lmaps_(n[k], dim, A),)
 @inline promote_to_lmaps(n, k, dim, A, B, Cs...) =
-    (promote_to_lmaps_(n[k], dim, A), promote_to_lmaps_(n[k+1], dim, B), promote_to_lmaps(n, k+2, dim, Cs...)...)
+    (promote_to_lmaps_(n[k], dim, A), promote_to_lmaps_(n[k+1], dim, B), promote_to_lmaps(n, k + 2, dim, Cs...)...)
 
 ############
 # basic methods
@@ -236,7 +236,7 @@ function isblocksquare(A::BlockMap)
     return all(==(N), rows)
 end
 
-symindex(i, N) = ((k, l) = divrem(i-1, N); return k + l * N + 1)
+symindex(i, N) = ((k, l) = divrem(i - 1, N); return k + l * N + 1)
 
 # the following rules are sufficient but not necessary
 function LinearAlgebra.issymmetric(A::BlockMap)
@@ -289,12 +289,12 @@ function _blockmul!(y, A, x, α, β)
     return __blockmul!(MulStyle(A), y, A, x, α, β)
 end
 
-__blockmul!(::MulStyle, y, A, x::Number, α, β)  = ___blockmul!(y, A, x, α, β)
+__blockmul!(::MulStyle, y, A, x::Number, α, β) = ___blockmul!(y, A, x, α, β)
 function ___blockmul!(y, A, x::Number, α, β)
     maps, rows, yinds, xinds = A.maps, A.rows, A.rowranges, A.colranges
     mapind = 0
     if iszero(β)
-        s = x*α
+        s = x * α
         for (row, yi) in zip(rows, yinds)
             mapind += 1
             _unsafe_mul!(view(y, yi, xinds[mapind]), maps[mapind], s)
@@ -317,9 +317,23 @@ function ___blockmul!(y, A, x::Number, α, β)
 end
 
 # provide one global intermediate storage vector if necessary
-__blockmul!(::FiveArg, y, A, x::AbstractVecOrMat, α, β)  = ___blockmul!(y, A, x, α, β, nothing)
-__blockmul!(::ThreeArg, y, A, x::AbstractVecOrMat, α, β) = ___blockmul!(y, A, x, α, β, similar(y))
-__blockmul!(::TwoArg, y, A, x::AbstractVecOrMat, α, β)  = ___blockmul!(y, A, x, α, β, nothing)
+__blockmul!(::FiveArg, y, A, x::AbstractVecOrMat, α, β) = ___blockmul!(y, A, x, α, β, nothing)
+
+# Cache for matrix multiplication B = A*X.
+# (size(B,1), size(B,2), thread, type)
+const block_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(maxsize=8)
+
+function __blockmul!(::ThreeArg, y, A, x::AbstractVecOrMat, α, β)
+    mul_key = (size(y)..., Threads.threadid(), eltype(y))
+    alloc_fcn = () -> similar(y)
+    sim_y_ref = get!(block_cache_lru, mul_key) do
+        [alloc_fcn()]
+    end
+    sim_y = length(sim_y_ref) < 1 ? alloc_fcn() : pop!(sim_y_ref)
+    ___blockmul!(y, A, x, α, β, sim_y)
+    push!(sim_y_ref, sim_y)
+end
+__blockmul!(::TwoArg, y, A, x::AbstractVecOrMat, α, β) = ___blockmul!(y, A, x, α, β, nothing)
 function ___blockmul!(y, A, x, α, β, ::Nothing)
     maps, rows, yinds, xinds = A.maps, A.rows, A.rowranges, A.colranges
     mapind = 0
@@ -349,7 +363,7 @@ function ___blockmul!(y, A, x, α, β, z)
             _unsafe_mul!(yrow, maps[mapind], xrow, α, β)
         end
         for _ in 2:row
-            mapind +=1
+            mapind += 1
             xrow = selectdim(x, 1, xinds[mapind])
             muladd!(MulStyle(maps[mapind]), yrow, maps[mapind], xrow, α, zrow)
         end
@@ -369,7 +383,7 @@ end
 function __transblockmul!(y, A, x::Number, α, β, transform)
     maps, rows, xinds, yinds = A.maps, A.rows, A.rowranges, A.colranges
     if iszero(β)
-        s = x*α
+        s = x * α
         # first block row (rowind = 1) of A, meaning first block column of A', fill all of y
         for rowind in 1:first(rows)
             _unsafe_mul!(view(y, yinds[rowind], first(xinds)), transform(maps[rowind]), s)
@@ -377,7 +391,7 @@ function __transblockmul!(y, A, x::Number, α, β, transform)
         mapind = first(rows)
         # subsequent block rows of A (block columns of A')
         @inbounds for i in 2:length(rows), _ in 1:rows[i]
-            mapind +=1
+            mapind += 1
             _unsafe_mul!(view(y, yinds[mapind], xinds[i]), transform(maps[mapind]), s)
         end
     else
@@ -391,7 +405,7 @@ function __transblockmul!(y, A, x::Number, α, β, transform)
         # add results to corresponding parts of y
         # TODO: think about multithreading
         @inbounds for i in 2:length(rows), _ in 1:rows[i]
-            mapind +=1
+            mapind += 1
             ytile = view(y, yinds[mapind], xinds[i])
             _unsafe_mul!(ytile, transform(maps[mapind]), x, α, β)
         end
@@ -413,7 +427,7 @@ function __transblockmul!(y, A, x, α, β, transform)
     @inbounds for i in 2:length(rows)
         xrow = selectdim(x, 1, xinds[i])
         for _ in 1:rows[i]
-            mapind +=1
+            mapind += 1
             yrow = selectdim(y, 1, yinds[mapind])
             _unsafe_mul!(yrow, transform(maps[mapind]), xrow, α, true)
         end
@@ -439,7 +453,7 @@ for In in (AbstractVector, AbstractMatrix)
 
     for (MT, transform) in ((:TransposeMap, :transpose), (:AdjointMap, :adjoint))
         @eval begin
-            MapType = $MT{<:Any, <:BlockMap}
+            MapType = $MT{<:Any,<:BlockMap}
             function _unsafe_mul!(y, wrapA::MapType, x::$In)
                 require_one_based_indexing(y, x)
                 return _transblockmul!(y, wrapA.lmap, x, true, false, $transform)
@@ -462,7 +476,7 @@ function _unsafe_mul!(Y, A::BlockMap, s::Number, α=true, β=false)
 end
 for (MT, transform) in ((:TransposeMap, :transpose), (:AdjointMap, :adjoint))
     @eval begin
-        function _unsafe_mul!(Y, wrapA::$MT{<:Any, <:BlockMap}, s::Number, α=true, β=false)
+        function _unsafe_mul!(Y, wrapA::$MT{<:Any,<:BlockMap}, s::Number, α=true, β=false)
             require_one_based_indexing(Y)
             return _transblockmul!(Y, wrapA.lmap, s, α, β, $transform)
         end
@@ -472,22 +486,22 @@ end
 ############
 # BlockDiagonalMap
 ############
-struct BlockDiagonalMap{T, As<:LinearMapTupleOrVector} <: LinearMap{T}
+struct BlockDiagonalMap{T,As<:LinearMapTupleOrVector} <: LinearMap{T}
     maps::As
     rowranges::Vector{UnitRange{Int}}
     colranges::Vector{UnitRange{Int}}
-    function BlockDiagonalMap{T, As}(maps::As) where {T, As<:LinearMapTupleOrVector}
+    function BlockDiagonalMap{T,As}(maps::As) where {T,As<:LinearMapTupleOrVector}
         for TA in Base.Generator(eltype, maps)
             promote_type(T, TA) == T ||
                 error("eltype $TA cannot be promoted to $T in BlockDiagonalMap constructor")
         end
         rowranges = _getranges(maps, 1)
         colranges = _getranges(maps, 2)
-        return new{T, As}(maps, rowranges, colranges)
+        return new{T,As}(maps, rowranges, colranges)
     end
 end
 
-BlockDiagonalMap{T}(maps::As) where {T, As<:LinearMapTupleOrVector} =
+BlockDiagonalMap{T}(maps::As) where {T,As<:LinearMapTupleOrVector} =
     BlockDiagonalMap{T,As}(maps)
 BlockDiagonalMap(maps::LinearMap...) =
     BlockDiagonalMap{promote_type(map(eltype, maps)...)}(maps)
@@ -495,18 +509,18 @@ BlockDiagonalMap(maps::LinearMap...) =
 # since the below methods are more specific than the Base method,
 # they would redefine Base/SparseArrays behavior
 for k in 1:8 # is 8 sufficient?
-    Is = ntuple(n->:($(Symbol(:A, n))::AbstractVecOrMatOrQ), Val(k-1))
+    Is = ntuple(n -> :($(Symbol(:A, n))::AbstractVecOrMatOrQ), Val(k - 1))
     # yields (:A1, :A2, :A3, ..., :A(k-1))
     L = :($(Symbol(:A, k))::LinearMap)
     # yields :Ak
-    mapargs = ntuple(n ->:($(Symbol(:A, n))), Val(k-1))
+    mapargs = ntuple(n -> :($(Symbol(:A, n))), Val(k - 1))
     # yields (:LinearMap(A1), :LinearMap(A2), ..., :LinearMap(A(k-1)))
 
     @eval function Base.cat($(Is...), $L, As::MapOrVecOrMat...; dims::Dims{2})
-        if dims == (1,2)
+        if dims == (1, 2)
             return BlockDiagonalMap(convert_to_lmaps($(mapargs...))...,
-                                    $(Symbol(:A, k)),
-                                    convert_to_lmaps(As...)...)
+                $(Symbol(:A, k)),
+                convert_to_lmaps(As...)...)
         else
             throw(ArgumentError("dims keyword in cat of LinearMaps must be (1,2)"))
         end

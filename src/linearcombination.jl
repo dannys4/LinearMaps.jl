@@ -1,18 +1,18 @@
-struct LinearCombination{T, As<:LinearMapTupleOrVector} <: LinearMap{T}
+struct LinearCombination{T,As<:LinearMapTupleOrVector} <: LinearMap{T}
     maps::As
-    function LinearCombination{T, As}(maps::As) where {T, As<:LinearMapTupleOrVector}
+    function LinearCombination{T,As}(maps::As) where {T,As<:LinearMapTupleOrVector}
         N = length(maps)
         ax = axes(maps[1])
         for n in eachindex(maps)
             A = maps[n]
             axes(A) == ax || throw(DimensionMismatch("LinearCombination"))
-            @assert promote_type(T, eltype(A)) == T  "eltype $(eltype(A)) cannot be promoted to $T in LinearCombination constructor"
+            @assert promote_type(T, eltype(A)) == T "eltype $(eltype(A)) cannot be promoted to $T in LinearCombination constructor"
         end
-        new{T, As}(maps)
+        new{T,As}(maps)
     end
 end
 
-LinearCombination{T}(maps::As) where {T, As} = LinearCombination{T, As}(maps)
+LinearCombination{T}(maps::As) where {T,As} = LinearCombination{T,As}(maps)
 
 # this method avoids the afoldl-mechanism even for LinearMapTuple
 Base.mapreduce(::typeof(identity), ::typeof(Base.add_sum), maps::LinearMapTupleOrVector) =
@@ -82,16 +82,16 @@ function Base.:(*)(A::LinearCombination, x::AbstractVector)
     if !isempty(midmaps) && MulStyle(midmaps...) === TwoArg()
         mapreduce(L -> L * x, Base.add_sum, A.maps)
     else
-        invoke(*, Tuple{LinearMap, AbstractVector}, A, x)
+        invoke(*, Tuple{LinearMap,AbstractVector}, A, x)
     end
 end
 function Base.:(*)(A::LinearCombination{T,<:Union{Tuple{Vararg{LinearMap{T}}},AbstractVector{<:LinearMap{T}}}},
-                    x::AbstractVector) where {T}
+    x::AbstractVector) where {T}
     midmaps = _tail(_front(A.maps))
     if (!isempty(midmaps) && MulStyle(midmaps...) === TwoArg()) || MulStyle(A) === TwoArg()
         mapreduce(L -> L * x, (x, y) -> x .+= y, A.maps)
     else
-        invoke(*, Tuple{LinearMap, AbstractVector}, A, x)
+        invoke(*, Tuple{LinearMap,AbstractVector}, A, x)
     end
 end
 
@@ -142,7 +142,21 @@ function _unsafe_mul!(M, L::LinearCombination, s::Number, α, β)
 end
 
 _mul!(::FiveArg, y, A::LinearCombination, x, α) = __mul!(y, _tail(A.maps), x, α, nothing)
-_mul!(::ThreeArg, y, A::LinearCombination, x, α) = __mul!(y, _tail(A.maps), x, α, similar(y))
+
+# Cache for matrix multiplication B = A*X.
+# (size(B,1), size(B,2), thread, type)
+const linear_combo_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(maxsize=8)
+
+function _mul!(::ThreeArg, y, A::LinearCombination, x, α)
+    mul_key = (size(y)..., Threads.threadid(), eltype(y))
+    alloc_fcn = () -> similar(y)
+    sim_y_ref = get!(linear_combo_cache_lru, mul_key) do
+        [alloc_fcn()]
+    end
+    sim_y = length(sim_y_ref) < 1 ? alloc_fcn() : pop!(sim_y_ref)
+    __mul!(y, _tail(A.maps), x, α, sim_y)
+    push!(sim_y_ref, sim_y)
+end
 _mul!(::TwoArg, y, A::LinearCombination, x, α) = __mul!(y, _tail(A.maps), x, α, nothing)
 
 # For tuple-like storage of the maps (default), we recurse on the tail of the tuple.

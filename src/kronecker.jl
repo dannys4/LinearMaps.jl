@@ -153,12 +153,23 @@ Base.:(==)(A::KroneckerMap, B::KroneckerMap) =
 # multiplication helper functions
 #################
 
+# Cache for matrix multiplication B = A*X.
+# (size(B,1), size(B,2), thread, type) -> Vector of spaces
+const kron_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(maxsize=8)
+
+__mm = 0
 @inline function _kronmul!(Y, B, X, A)
     # minimize intermediate memory allocation
     if size(B, 2) * size(A, 1) <= size(B, 1) * size(A, 2)
-        temp = similar(Y, (size(B, 2), size(A, 1)))
+        mul_key = (size(B, 2), size(A, 1), Threads.threadid(), eltype(Y))
+        alloc_fcn = () -> similar(Y, (size(B, 2), size(A, 1)))
+        temp_ref = get!(kron_cache_lru, mul_key) do
+            [alloc_fcn()]
+        end
+        temp = length(temp_ref) < 1 ? alloc_fcn() : pop!(temp_ref)
         _unsafe_mul!(temp, X, transpose(A))
         _unsafe_mul!(Y, B, temp)
+        push!(temp_ref, temp)
     else
         temp = similar(Y, (size(B, 1), size(A, 2)))
         _unsafe_mul!(temp, B, X)
@@ -182,22 +193,25 @@ end
     return Y
 end
 
-# Cache for matrix multiplication B = A*X.
-# (size(B,1), size(B,2), thread, type)
-const kron_cache_lru = LRU{Tuple{Int,Int,Int,DataType},AbstractVecOrMat}(maxsize=8)
-
+# __mm = 0
 @inline function _kronmul!(Y, B, X, A::VecOrMatMap{T}) where {T}
+    # global __mm
     At = transpose(A.lmap)
     use_X_mul_At = size(B, 2) * size(A, 1) <= size(B, 1) * size(A, 2)
     if use_X_mul_At
         mul_key = (size(X, 1), size(At, 2), Threads.threadid(), T)
         cache_miss = false
-        X_mul_At_space = get!(kron_cache_lru, mul_key) do
+        alloc_fcn = () -> begin
             cache_miss = true
             X * At
         end
+        X_mul_At_ref = get!(kron_cache_lru, mul_key) do
+            [alloc_fcn()]
+        end
+        X_mul_At_space = length(X_mul_At_ref) < 1 ? alloc_fcn() : pop!(X_mul_At_ref)
         cache_miss || mul!(X_mul_At_space, X, At)
         _unsafe_mul!(Y, B, X_mul_At_space)
+        push!(X_mul_At_ref, X_mul_At_space)
     else
         _unsafe_mul!(Y, Matrix(B * X), At)
     end
