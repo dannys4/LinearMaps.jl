@@ -142,21 +142,7 @@ function _unsafe_mul!(M, L::LinearCombination, s::Number, α, β)
 end
 
 _mul!(::FiveArg, y, A::LinearCombination, x, α) = __mul!(y, _tail(A.maps), x, α, nothing)
-
-# Cache for matrix multiplication B = A*X.
-# (size(B,1), size(B,2), thread, type)
-const linear_combo_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(maxsize=8)
-
-function _mul!(::ThreeArg, y, A::LinearCombination, x, α)
-    mul_key = (size(y)..., Threads.threadid(), eltype(y))
-    alloc_fcn = () -> similar(y)
-    sim_y_ref = get!(linear_combo_cache_lru, mul_key) do
-        [alloc_fcn()]
-    end
-    sim_y = length(sim_y_ref) < 1 ? alloc_fcn() : pop!(sim_y_ref)
-    __mul!(y, _tail(A.maps), x, α, sim_y)
-    push!(sim_y_ref, sim_y)
-end
+_mul!(::ThreeArg, y, A::LinearCombination, x, α) = __mul!(y, _tail(A.maps), x, α, similar(y))
 _mul!(::TwoArg, y, A::LinearCombination, x, α) = __mul!(y, _tail(A.maps), x, α, nothing)
 
 # For tuple-like storage of the maps (default), we recurse on the tail of the tuple.
