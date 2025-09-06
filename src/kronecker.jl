@@ -155,9 +155,9 @@ Base.:(==)(A::KroneckerMap, B::KroneckerMap) =
 
 # Cache for matrix multiplication B = A*X.
 # (size(B,1), size(B,2), thread, type) -> Vector of spaces
-const kron_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(maxsize=8)
+const kron_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(maxsize=10)
 
-@inline function _kronmul!(Y, B, X, A)
+@inline function _kronmul!(Y, B, X, A, alpha, beta)
     # minimize intermediate memory allocation
     if size(B, 2) * size(A, 1) <= size(B, 1) * size(A, 2)
         mul_key = (size(B, 2), size(A, 1), Threads.threadid(), eltype(Y))
@@ -167,34 +167,40 @@ const kron_cache_lru = LRU{Tuple{Int,Int,Int,DataType},Vector{Matrix{Float64}}}(
         end
         temp = length(temp_ref) < 1 ? alloc_fcn() : pop!(temp_ref)
         _unsafe_mul!(temp, X, transpose(A))
-        _unsafe_mul!(Y, B, temp)
+        _unsafe_mul!(Y, B, temp, alpha, beta)
         push!(temp_ref, temp)
     else
         temp = similar(Y, (size(B, 1), size(A, 2)))
         _unsafe_mul!(temp, B, X)
-        _unsafe_mul!(Y, temp, transpose(A))
+        _unsafe_mul!(Y, temp, transpose(A), alpha, beta)
     end
     return Y
 end
-@inline function _kronmul!(Y, B::UniformScalingMap, X, A)
-    _unsafe_mul!(Y, X, transpose(A))
-    !isone(B.λ) && lmul!(B.λ, Y)
+@inline function _kronmul!(Y, B::UniformScalingMap, X, A, alpha, beta)
+    if isone(alpha) && iszero(beta)
+        _unsafe_mul!(Y, X, transpose(A))
+        !isone(B.λ) && lmul!(B.λ, Y)
+    else
+        _unsafe_mul!(Y, X, transpose(A), alpha * B.λ, beta)
+    end
     return Y
 end
 @inline function _kronmul!(Y, B, X, A::UniformScalingMap)
-    _unsafe_mul!(Y, B, X)
-    !isone(A.λ) && rmul!(Y, A.λ)
+    if isone(alpha) && iszero(beta)
+        _unsafe_mul!(Y, B, X)
+        !isone(A.λ) && rmul!(Y, A.λ)
+    else
+        _unsafe_mul!(Y, B, X, alpha * A.λ, beta)
+    end
     return Y
 end
 # disambiguation (cannot occur)
-@inline function _kronmul!(Y, B::UniformScalingMap, X, A::UniformScalingMap)
-    mul!(parent(Y), A.λ * B.λ, parent(X))
+@inline function _kronmul!(Y, B::UniformScalingMap, X, A::UniformScalingMap, alpha, beta)
+    mul!(parent(Y), A.λ * B.λ, parent(X), alpha, beta)
     return Y
 end
 
-# __mm = 0
-@inline function _kronmul!(Y, B, X, A::VecOrMatMap{T}) where {T}
-    # global __mm
+@inline function _kronmul!(Y, B, X, A::VecOrMatMap{T}, alpha, beta) where {T}
     At = transpose(A.lmap)
     use_X_mul_At = size(B, 2) * size(A, 1) <= size(B, 1) * size(A, 2)
     if use_X_mul_At
@@ -209,16 +215,21 @@ end
         end
         X_mul_At_space = length(X_mul_At_ref) < 1 ? alloc_fcn() : pop!(X_mul_At_ref)
         cache_miss || mul!(X_mul_At_space, X, At)
-        _unsafe_mul!(Y, B, X_mul_At_space)
+        _unsafe_mul!(Y, B, X_mul_At_space, alpha, beta)
         push!(X_mul_At_ref, X_mul_At_space)
     else
-        _unsafe_mul!(Y, Matrix(B * X), At)
+        _unsafe_mul!(Y, Matrix(B * X), At, alpha, beta)
     end
     return Y
 end
-@inline function _kronmul!(Y, B::UniformScalingMap, X, A::VecOrMatMap)
-    _unsafe_mul!(Y, X, transpose(A.lmap))
-    !isone(B.λ) && lmul!(B.λ, Y)
+
+@inline function _kronmul!(Y, B::UniformScalingMap, X, A::VecOrMatMap, alpha, beta)
+    if isone(alpha) && iszero(beta)
+        _unsafe_mul!(Y, X, transpose(A.lmap))
+        !isone(B.λ) && lmul!(B.λ, Y)
+    else
+        _unsafe_mul!(Y, X, transpase(A.lmap), B.λ * alpha, beta)
+    end
     return Y
 end
 
@@ -241,16 +252,20 @@ function _unsafe_mul!(y, L::KroneckerMap{<:Any,<:Tuple{VectorMap,VectorMap}}, x:
     rmul!(y, first(x))
     return y
 end
-function _unsafe_mul!(y, L::KroneckerMap2, x::AbstractVector)
+
+function _unsafe_mul!(y, L::KroneckerMap2, x::AbstractVector, alpha, beta)
     require_one_based_indexing(y)
     A, B = L.maps
     ma, na = size(A)
     mb, nb = size(B)
     X = reshape(x, (nb, na))
     Y = reshape(y, (mb, ma))
-    _kronmul!(Y, B, X, A)
+    _kronmul!(Y, B, X, A, alpha, beta)
     return y
 end
+
+MulStyle(::KroneckerMap2) = FiveArg()
+
 function _unsafe_mul!(y, L::KroneckerMap, x::AbstractVector)
     require_one_based_indexing(y)
     maps = L.maps
@@ -260,7 +275,7 @@ function _unsafe_mul!(y, L::KroneckerMap, x::AbstractVector)
         mb, nb = size(B)
         X = reshape(x, (nb, na))
         Y = reshape(y, (mb, ma))
-        _kronmul!(Y, B, X, A)
+        _kronmul!(Y, B, X, A, true, false)
     else
         A = first(maps)
         B = KroneckerMap{eltype(L)}(_tail(maps))
@@ -268,7 +283,7 @@ function _unsafe_mul!(y, L::KroneckerMap, x::AbstractVector)
         mb, nb = size(B)
         X = reshape(x, (nb, na))
         Y = reshape(y, (mb, ma))
-        _kronmul!(Y, B, X, A)
+        _kronmul!(Y, B, X, A, true, false)
     end
     return y
 end
